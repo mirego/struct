@@ -87,9 +87,9 @@
           (into #{} (map' :path steps))))
 
 (defn- validate-internal
-  [data steps opts]
+  [message-fn data steps opts]
   (loop [skip #{}
-         errors nil
+         errors []
          data data
          steps steps]
     (if-let [step (first steps)]
@@ -107,11 +107,10 @@
             (recur skip errors (assoc-in data path value) (rest steps)))
 
           :else
-          (let [message (prepare-message opts step)]
             (recur (conj skip path)
-                   (assoc-in errors path message)
+                   (conj errors (message-fn step))
                    (dissoc-in data path)
-                   (rest steps)))))
+                   (rest steps))))
       [errors data])))
 
 ;; --- Public Api
@@ -122,22 +121,22 @@
   This function by default strips all data that does not defined in
   schema, but this behavior can be changed passing `{:strip false}`
   as third argument."
-  ([data schema]
-   (validate data schema nil))
-  ([data schema {:keys [strip]
-                 :or {strip false}
-                 :as opts}]
+  ([message-fn data schema]
+   (validate message-fn data schema nil))
+  ([message-fn data schema {:keys [strip]
+                            :or {strip false}
+                            :as opts}]
    (let [steps (build-steps schema)
          data (if strip (strip-values data steps) data)]
-     (validate-internal data steps opts))))
+     (validate-internal message-fn data steps opts))))
 
 (defn validate-single
   "A helper that used just for validate one value."
-  ([data schema] (validate-single data schema nil))
-  ([data schema opts]
+  ([message-fn data schema] (validate-single data schema nil))
+  ([message-fn data schema opts]
    (let [data {:field data}
          steps (build-steps {:field schema})]
-     (mapv :field (validate-internal data steps opts)))))
+     (mapv :field (validate-internal message-fn data steps opts)))))
 
 (defn validate!
   "Analogous function to the `validate` that instead of return
@@ -196,19 +195,22 @@
     {:message "must be a valid email"
      :optional true
      :validate #(and (string? %)
-                     (re-seq rx %))}))
+                     (re-seq rx %))
+     :type "email"}))
 
 (def required
   {:message "this field is mandatory"
    :optional false
    :validate #(if (string? %)
                  (not (empty? %))
-                 (not (nil? %)))})
+                 (not (nil? %)))
+   :type "required"})
 
 (def number
   {:message "must be a number"
    :optional true
    :validate number?})
+
 
 (def number-str
   {:message "must be a number"
@@ -272,17 +274,19 @@
                  (<= from v to)))]
     {:message "not in range"
      :optional true
-     :validate validate}))
+     :validate validate
+     :type "between"}))
 
 (def positive
   {:message "must be positive"
    :optional true
-   :validate pos?})
+   :validate pos?
+   :type "positive"})
 
 (def negative
   {:message "must be negative"
    :optional true
-   :validate neg?})
+   :validate neg? :type "negative"})
 
 (def map
   {:message "must be a map"
@@ -325,7 +329,8 @@
    :state true
    :validate (fn [state v ref]
                (let [prev (get state ref)]
-                 (= prev v)))})
+                 (= prev v)))
+   :type "match"})
 
 (def min-count
   (letfn [(validate [v minimum]
@@ -333,7 +338,9 @@
             (>= (count v) minimum))]
     {:message "less than the minimum"
      :optional true
-     :validate validate}))
+     :validate validate
+     :type "min-count"}))
+
 
 (def max-count
   (letfn [(validate [v maximum]
@@ -341,4 +348,5 @@
             (<= (count v) maximum))]
     {:message "longer than the maximum"
      :optional true
-     :validate validate}))
+     :validate validate
+     :type "max-count"}))
